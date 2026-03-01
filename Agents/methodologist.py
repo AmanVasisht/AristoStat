@@ -31,7 +31,7 @@ from Tools.methodologist import (
 # ─────────────────────────────────────────────
 
 from langchain_groq import ChatGroq
-model = ChatGroq(model="meta-llama/llama-4-maverick-17b-128e-instruct", temperature=0)
+model = ChatGroq(model="qwen/qwen3-32b", temperature=0)
 
 # ─────────────────────────────────────────────
 # AGENT FACTORY

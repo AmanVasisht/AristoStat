@@ -1,12 +1,8 @@
 """
-FILE: agents/model_critic.py
+FILE: Agents/critic.py
 ------------------------------
 Model Critic agent — direct engine call, no ReAct agent.
 LLM used only for formatting the final response.
-
-Imports:
-  - Engine   ← core/model_critic_engine.py (called directly)
-  - Schemas  ← schemas/model_critic_schema.py
 """
 
 from typing import Any
@@ -40,33 +36,23 @@ def run_model_critic(
 ) -> dict[str, Any]:
     """
     Entry point called by the LangGraph orchestrator (main.py).
-    Calls model_critic_engine directly — no ReAct agent.
+    Unpacks the output dicts and calls run_post_test_checks directly.
     LLM used only to format the human-readable response.
-
-    Args:
-        statistician_output:  StatisticianOutput dict — test results + test_family.
-        fitted_model:         Fitted model object from Statistician (in memory).
-                              Passed directly — not serialized.
-                              None for inference, correlation, dimensionality tests.
-        cleaned_df:           Current working DataFrame.
-        methodologist_output: MethodologistOutput dict — column roles.
-
-    Returns:
-        {
-          "messages":          Empty list (no agent messages).
-          "final_response":    Human-readable post-test check summary shown to user.
-          "critic_output":     Raw ModelCriticOutput dict for orchestrator routing.
-                               Key fields:
-                                 - checks_applicable:       False if non-regression test
-                                 - has_failures:            True if any check failed
-                                 - proceed_to_final_report: True if safe to proceed
-        }
     """
+
+    # ── Unpack fields that run_post_test_checks expects ──
+    test_family      = statistician_output.get("test_family", "")
+    test_name        = statistician_output.get("test_name", "")
+    dependent_var    = methodologist_output.get("dependent_variable")
+    independent_vars = methodologist_output.get("independent_variables", [])
+
     critic_output = run_post_test_checks(
-        statistician_output=statistician_output,
+        test_family=test_family,
         fitted_model=fitted_model,
-        cleaned_df=cleaned_df,
-        methodologist_output=methodologist_output,
+        df=cleaned_df,
+        dependent_var=dependent_var,
+        independent_vars=independent_vars,
+        test_name=test_name,
     )
 
     critic_output_dict = critic_output.model_dump()
@@ -75,8 +61,7 @@ def run_model_critic(
     if not critic_output.checks_applicable:
         final_response = (
             f"Post-test model checks are not applicable for "
-            f"{statistician_output.get('test_name', 'this test')}. "
-            f"Proceeding to final report."
+            f"{test_name or 'this test'}. Proceeding to final report."
         )
     else:
         format_prompt = f"""Format these post-test model check results clearly for the user.

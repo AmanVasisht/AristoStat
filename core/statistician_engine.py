@@ -416,11 +416,25 @@ def run_ols_regression(
     n_obs    = len(X)
     n_params = X.shape[1] + 1  # +1 for constant
     if n_obs <= n_params:
-        raise ValueError(
-            f"Model has {n_params} parameters (after encoding categoricals as dummies) "
-            f"but only {n_obs} observations. Not enough degrees of freedom to fit. "
-            f"Remove some predictors or collect more data."
+        error_msg = (
+            f"❌ Not enough observations to fit regression.\n"
+            f"Observations: {n_obs}, Parameters: {n_params}\n"
+            f"Suggestion: Reduce predictors or collect more data."
         )
+
+        return StatisticianOutput(
+            test_name=test_name,
+            test_family=TestFamily.REGRESSION,
+            regression_result=None,
+            n_observations=n_obs,
+            correction_applied=correction_type,
+            columns_used={
+                "dependent": dependent_var,
+                "independent": ", ".join(independent_vars)
+            },
+            model_available_in_memory=False,
+            interpretation=error_msg,
+        ), None
     X_const = add_constant(X)
     
     model = OLS(y, X_const).fit()

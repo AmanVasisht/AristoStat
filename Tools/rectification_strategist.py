@@ -104,6 +104,15 @@ def get_proposed_solutions() -> str:
                            "or proceeding with the test while acknowledging the violations."
         }, indent=2)
 
+    # ── Save proposals to store so orchestrator can access them ──
+    from Schemas.rectification_strategist import RectificationOutput
+    output = RectificationOutput(
+        phase=phase,
+        failed_assumptions=failed,
+        proposed_solutions=proposals,
+    )
+    _rectification_store["rectification_output"] = output
+
     return json.dumps([
         {
             "solution_id":  p.solution_id,

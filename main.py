@@ -52,6 +52,7 @@ from Agents.final_report             import run_final_report
 
 # ── Fitted model accessor ──
 from Tools.statistician import get_fitted_model
+from Schemas.methodologist import MethodologistOutput, SelectionMode
 
 
 # ─────────────────────────────────────────────
@@ -268,8 +269,45 @@ def node_methodologist_run(state: AristostatState) -> AristostatState:
     """Runs methodologist LLM — no interrupts."""
     print("\n[NODE: methodologist_run] Starting...")
     print(f"[NODE: methodologist_run] intent_output: {state.get('intent_output')}")
-    
+    intent = state.get("intent_output", {})
+    if intent.get("methodologist_bypass") and intent.get("requested_test"):
 
+        selected_test = intent["requested_test"]
+
+        dependent = next(
+            (c["name"] for c in intent["columns"] if c["role"] == "dependent"),
+            None
+        )
+
+        independents = [
+            c["name"]
+            for c in intent["columns"]
+            if c["role"] == "independent"
+        ]
+
+        # Build REAL schema object (not manual dict)
+        methodologist_output_obj = MethodologistOutput(
+            selected_test=selected_test,
+
+            # IMPORTANT: must use enum
+            selection_mode=SelectionMode.BYPASS,
+
+            dependent_variable=dependent,
+            independent_variables=independents,
+
+            reasoning=f"Using {selected_test} based on user's explicit request.",
+
+            original_query=intent.get("original_query", "")
+        )
+
+        structured_output = methodologist_output_obj.model_dump()
+
+        return {
+            **state,
+            "methodologist_output": structured_output,
+            "_methodologist_response":
+                f"Using {selected_test} based on your explicit request."
+        }
     result = run_methodologist(
         intent_output=state["intent_output"],
         profiler_output=state["profiler_output"],
@@ -489,8 +527,10 @@ def node_rectification_strategist_run(state: AristostatState) -> AristostatState
         rectification_attempt=attempt,
         max_attempts=3,
     )
-
+    print(f"[DEBUG] raw result rectification_output type: {type(result['rectification_output'])}")
+    print(f"[DEBUG] raw proposed_solutions: {result['rectification_output'].get('proposed_solutions')}")
     rect_output = _serialize_output(result["rectification_output"])
+    print(f"[DEBUG run] serialized proposed_solutions: {rect_output.get('proposed_solutions')}")
     print(f"[NODE: rectification_strategist_run] proposed_solutions: {len(rect_output.get('proposed_solutions', []))}")
 
     return {
@@ -544,7 +584,10 @@ def node_rectification_strategist_confirm(state: AristostatState) -> AristostatS
 
     solution_id = _resolve_solution_choice(user_response, rect_output.get("proposed_solutions", []))
     print(f"[NODE: rectification_strategist_confirm] chosen solution_id: {solution_id}")
-
+    print(f"[DEBUG] proposed_solutions: {rect_output.get('proposed_solutions')}")
+    print(f"[DEBUG] user_response raw: {repr(user_response)}")
+    solution_id = _resolve_solution_choice(user_response, rect_output.get("proposed_solutions", []))
+    print(f"[DEBUG] resolved solution_id: {solution_id}")
     from Tools.rectification_strategist import init_rectification_store, get_rectification_store
     from core.rectification_engine import build_rectification_output
     from Schemas.rectification_strategist import RectificationPhase
@@ -857,15 +900,15 @@ def build_graph() -> StateGraph:
     return builder.compile(checkpointer=memory)
 
 
-def save_graph_image(output_path: str = "aristostat_graph.png") -> None:
-    try:
-        png_bytes = graph.get_graph().draw_mermaid_png()
-        with open(output_path, "wb") as f:
-            f.write(png_bytes)
-        print(f"Graph diagram saved to: {output_path}")
-    except Exception as e:
-        print(f"Could not render PNG ({e}). Mermaid source:\n")
-        print(graph.get_graph().draw_mermaid())
+# def save_graph_image(output_path: str = "aristostat_graph.png") -> None:
+#     try:
+#         png_bytes = graph.get_graph().draw_mermaid_png()
+#         with open(output_path, "wb") as f:
+#             f.write(png_bytes)
+#         print(f"Graph diagram saved to: {output_path}")
+#     except Exception as e:
+#         print(f"Could not render PNG ({e}). Mermaid source:\n")
+#         print(graph.get_graph().draw_mermaid())
 
 
 # ─────────────────────────────────────────────
@@ -873,7 +916,6 @@ def save_graph_image(output_path: str = "aristostat_graph.png") -> None:
 # ─────────────────────────────────────────────
 
 graph = build_graph()
-save_graph_image("aristostat_graph.png")
 
 
 def run_aristostat(
@@ -924,7 +966,7 @@ if __name__ == "__main__":
 
     csv_path   = sys.argv[1]
     user_query = sys.argv[2]
-    thread_id  = "cli_session"
+    thread_id  = "cli_session_1"
 
     print("\n" + "=" * 60)
     print("  ARISTOSTAT: THE LOGICAL INFERENCE ENGINE")
