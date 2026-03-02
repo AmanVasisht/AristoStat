@@ -189,7 +189,14 @@ RECTIFICATION_REGISTRY: dict[str, list[dict]] = {
             "action_details": {"new_test": "Principal Component Analysis"},
             "next_step":    "assumption_checker",
             "phase":        "pre_test",
-        },
+        },{
+        "solution_id":  "multicollinearity_drop_variable",
+        "description":  "Drop a collinear predictor — remove one of the highly correlated variables from the model and re-run assumption checks. You will be asked which variable to drop.",
+        "action_type":  "drop_variable",
+        "action_details": {"column": None},   # filled in at runtime from user input
+        "next_step":    "assumption_checker",
+        "phase":        "pre_test",
+    },
     ],
 
     # ─────────────────────────────────────────────

@@ -4,15 +4,15 @@ TEST_REQUIREMENTS: dict[str, dict] = {
         "grouping": False, "min_groups": None, "max_groups": None, "min_n": 20,
     },
     "Multiple Linear Regression": {
-        "dependent": "continuous", "independent": "continuous",
+        "dependent": "continuous", "independent": "any",
         "grouping": False, "min_groups": None, "max_groups": None, "min_n": 30,
     },
     "Ridge Regression": {
-        "dependent": "continuous", "independent": "continuous",
+        "dependent": "continuous", "independent": "any",
         "grouping": False, "min_groups": None, "max_groups": None, "min_n": 30,
     },
     "Lasso Regression": {
-        "dependent": "continuous", "independent": "continuous",
+        "dependent": "continuous", "independent": "any",
         "grouping": False, "min_groups": None, "max_groups": None, "min_n": 30,
     },
     "One-Way ANOVA": {

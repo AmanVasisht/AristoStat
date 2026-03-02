@@ -300,6 +300,20 @@ def apply_solution(
             df, dropped = drop_outliers_iqr(df, dependent_var)
         elif target == "influential_points" and dependent_var and independent_vars:
             df, dropped = drop_influential_points(df, dependent_var, independent_vars)
+    elif solution.action_type == "drop_variable":
+        column_to_drop = solution.action_details.get("column")
+        if column_to_drop and column_to_drop in df.columns:
+            df = df.drop(columns=[column_to_drop])
+            # Remove from independent_vars tracking via transform log
+            applied_transforms = [AppliedTransform(
+                transform_type="drop_variable",
+                column=column_to_drop,
+                description=f"Dropped '{column_to_drop}' from the model due to high multicollinearity (VIF ≥ 10).",
+                note=f"Re-run assumption checks to verify multicollinearity is resolved.",
+            )]
+            # Also remove from independent_vars list so downstream engines don't use it
+            if column_to_drop in independent_vars:
+                independent_vars.remove(column_to_drop)
 
     return df, applied_transforms, new_test, correction_type
 

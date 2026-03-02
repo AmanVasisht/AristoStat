@@ -326,8 +326,55 @@ def node_methodologist_run(state: AristostatState) -> AristostatState:
     }
 
 
+# def node_methodologist_confirm(state: AristostatState) -> AristostatState:
+#     """Shows test selection to user and confirms — contains the interrupt."""
+#     print("\n[NODE: methodologist_confirm] Starting...")
+
+#     user_response = interrupt({
+#         "message": state.get("_methodologist_response", ""),
+#         "prompt":  "Shall I proceed with this test? (yes/no, or describe the test you want)",
+#         "type":    "confirm",
+#     })
+
+#     user_input = str(user_response).strip().lower()
+
+#     # ── User confirmed ──
+#     if user_input in ("yes", "y"):
+#         return state
+
+#     # ── User said no with no correction — stop ──
+#     if user_input in ("no", "n"):
+#         print("[NODE: methodologist_confirm] User stopped pipeline.")
+#         return {**state, "fatal_error": "User stopped pipeline after test selection."}
+
+#     # ── User gave a correction — re-run methodologist with their input ──
+#     print(f"[NODE: methodologist_confirm] User corrected: {user_response}")
+#     from Agents.methodologist import run_methodologist
+
+#     # Build a corrected intent that includes the user's requested test
+#     corrected_intent = {
+#         **state.get("intent_output", {}),
+#         "requested_test":      str(user_response),
+#         "methodologist_bypass": True,
+#         "intent_type":         "explicit_test",
+#     }
+
+#     corrected_result = run_methodologist(
+#         intent_output=corrected_intent,
+#         profiler_output=state["profiler_output"],
+#     )
+
+#     corrected_methodologist = _serialize_output(corrected_result["methodologist_output"])
+#     print(f"[NODE: methodologist_confirm] corrected test: {corrected_methodologist.get('selected_test')}")
+
+#     return {
+#         **state,
+#         "methodologist_output":    corrected_methodologist,
+#         "_methodologist_response": corrected_result["final_response"],
+#     }
+
+
 def node_methodologist_confirm(state: AristostatState) -> AristostatState:
-    """Shows test selection to user and confirms — contains the interrupt."""
     print("\n[NODE: methodologist_confirm] Starting...")
 
     user_response = interrupt({
@@ -347,16 +394,29 @@ def node_methodologist_confirm(state: AristostatState) -> AristostatState:
         print("[NODE: methodologist_confirm] User stopped pipeline.")
         return {**state, "fatal_error": "User stopped pipeline after test selection."}
 
-    # ── User gave a correction — re-run methodologist with their input ──
+    # ── User gave a correction — extract canonical test name first ──
     print(f"[NODE: methodologist_confirm] User corrected: {user_response}")
-    from Agents.methodologist import run_methodologist
 
-    # Build a corrected intent that includes the user's requested test
+    from core.intent_engine import detect_explicit_test
+    # from Agents.methodologist import run_methodologist
+
+    # Try to extract a known test name from the user's free text
+    # e.g. "no, i said proceed with mlr" → "Multiple Linear Regression"
+    canonical_test = detect_explicit_test(str(user_response))
+
+    if canonical_test:
+        print(f"[NODE: methodologist_confirm] Extracted test: {canonical_test}")
+        requested_test = canonical_test
+    else:
+        # No known test found — pass the raw string and let the LLM interpret it
+        print(f"[NODE: methodologist_confirm] No canonical test found, passing raw: {user_response}")
+        requested_test = str(user_response)
+
     corrected_intent = {
         **state.get("intent_output", {}),
-        "requested_test":      str(user_response),
+        "requested_test":       requested_test,
         "methodologist_bypass": True,
-        "intent_type":         "explicit_test",
+        "intent_type":          "explicit_test",
     }
 
     corrected_result = run_methodologist(
@@ -372,7 +432,6 @@ def node_methodologist_confirm(state: AristostatState) -> AristostatState:
         "methodologist_output":    corrected_methodologist,
         "_methodologist_response": corrected_result["final_response"],
     }
-
 
 # ── PREPROCESSOR ──
 
@@ -583,6 +642,36 @@ def node_rectification_strategist_confirm(state: AristostatState) -> AristostatS
         }
 
     solution_id = _resolve_solution_choice(user_response, rect_output.get("proposed_solutions", []))
+    # ── Special case: drop variable — ask which one ──
+    if solution_id == "multicollinearity_drop_variable":
+        ind_vars = state["methodologist_output"].get("independent_variables", [])
+
+        # Find high-VIF variables from checker results to suggest to user
+        high_vif_vars = _get_high_vif_variables(state.get("checker_output", {}))
+        suggestion = f" (suggested: {', '.join(high_vif_vars)})" if high_vif_vars else ""
+
+        drop_response = interrupt({
+            "message": f"Which variable would you like to drop?{suggestion}\nAvailable predictors: {', '.join(ind_vars)}",
+            "prompt":  "Enter the exact variable name to drop: ",
+            "type":    "confirm",
+        })
+
+        column_to_drop = str(drop_response).strip()
+
+        # Inject the chosen column into the solution details
+        rect_output_modified = dict(rect_output)
+        for sol in rect_output_modified.get("proposed_solutions", []):
+            if isinstance(sol, dict) and sol.get("solution_id") == "multicollinearity_drop_variable":
+                sol["action_details"] = {"column": column_to_drop}
+            elif hasattr(sol, "solution_id") and sol.solution_id == "multicollinearity_drop_variable":
+                sol.action_details["column"] = column_to_drop
+
+        # Also update methodologist_output to remove the dropped variable
+        updated_ind_vars = [v for v in ind_vars if v != column_to_drop]
+        updated_methodologist = {
+            **state["methodologist_output"],
+            "independent_variables": updated_ind_vars,
+        }
     print(f"[NODE: rectification_strategist_confirm] chosen solution_id: {solution_id}")
     print(f"[DEBUG] proposed_solutions: {rect_output.get('proposed_solutions')}")
     print(f"[DEBUG] user_response raw: {repr(user_response)}")
@@ -851,6 +940,17 @@ def _resolve_solution_choice(user_response: Any, solutions: list) -> str | None:
         return response
     return None
 
+def _get_high_vif_variables(checker_output: dict) -> list[str]:
+    """Extract variable names with high VIF from checker results for user suggestion."""
+    for result in checker_output.get("results", []):
+        if "multicollinearity" in result.get("name", "").lower() or \
+           "vif" in result.get("plain_reason", "").lower():
+            reason = result.get("plain_reason", "")
+            # Parse "VIF scores: {Age: 27.14 (≥10), Years of Experience: 27.24 (≥10), ...}"
+            import re
+            high_vif = re.findall(r"([\w\s]+?):\s*[\d.]+\s*\(≥10\)", reason)
+            return [v.strip() for v in high_vif]
+    return []
 
 # ─────────────────────────────────────────────
 # GRAPH CONSTRUCTION
