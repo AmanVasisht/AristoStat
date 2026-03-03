@@ -273,6 +273,77 @@ def run_one_way_anova(
         columns_used={"dependent": dependent_var, "grouping": grouping_var},
     ), None
 
+def run_two_way_anova(df, dependent_var, independent_var1, independent_var2, correction_type=None):
+    import statsmodels.api as sm
+    from statsmodels.formula.api import ols
+    import numpy as np
+
+    formula = (
+        f'Q("{dependent_var}") ~ '
+        f'C(Q("{independent_var1}")) + '
+        f'C(Q("{independent_var2}")) + '
+        f'C(Q("{independent_var1}")):C(Q("{independent_var2}"))'
+    )
+
+    model       = ols(formula, data=df).fit()
+    anova_table = sm.stats.anova_lm(model, typ=2)
+
+    # Extract the minimum p-value across all effects (main + interaction)
+    p_values  = anova_table["PR(>F)"].dropna()
+    min_pval  = float(p_values.min()) if not p_values.empty else 1.0
+    f_vals    = anova_table["F"].dropna()
+    max_f     = float(f_vals.max()) if not f_vals.empty else 0.0
+
+    # Build a readable interpretation
+    rows = []
+    for idx, row in anova_table.iterrows():
+        f   = row.get("F")
+        p   = row.get("PR(>F)")
+        if f is None or p is None:
+            continue
+        sig = "significant" if p < 0.05 else "not significant"
+        rows.append(f"{idx}: F={f:.3f}, p={p:.4f} ({sig})")
+    interpretation = "Two-Way ANOVA results:\n" + "\n".join(rows)
+
+    # Compute eta-squared for overall model
+    ss_model  = anova_table["sum_sq"].dropna().sum()
+    ss_resid  = anova_table.loc[anova_table.index.str.lower().str.contains("resid"), "sum_sq"]
+    ss_total  = ss_model + (float(ss_resid.iloc[0]) if not ss_resid.empty else 0.0)
+    eta_sq    = round(ss_model / ss_total, 4) if ss_total > 0 else None
+
+    verdict = (
+        SignificanceVerdict.SIGNIFICANT     if min_pval < 0.05
+        else SignificanceVerdict.BORDERLINE if min_pval < 0.10
+        else SignificanceVerdict.NOT_SIGNIFICANT
+    )
+
+    inference = InferenceResult(
+        test_name        = "Two-Way ANOVA",
+        statistic        = max_f,
+        statistic_label  = "F",
+        p_value          = min_pval,
+        alpha            = 0.05,
+        verdict          = verdict,
+        df_between       = float(anova_table["df"].iloc[0]) if len(anova_table) > 0 else None,
+        df_within        = float(anova_table["df"].iloc[-1]) if len(anova_table) > 0 else None,
+        effect_size      = eta_sq,
+        effect_size_label= "eta-squared",
+        interpretation   = interpretation,
+    )
+
+    output = StatisticianOutput(
+        test_name               = "Two-Way ANOVA",
+        test_family             = TestFamily.INFERENCE,
+        inference_result        = inference,
+        n_observations          = len(df),
+        columns_used            = {
+            "dependent":   dependent_var,
+            "independent": f"{independent_var1}, {independent_var2}",
+        },
+        model_available_in_memory = True,
+    )
+
+    return output, model
 
 def run_mann_whitney(
     df: pd.DataFrame,
@@ -803,11 +874,19 @@ def run_test(
         return run_one_sample_ttest(df, dependent_var)
 
     elif test_name == "One-Way ANOVA":
-        return run_one_way_anova(df, dependent_var, grouping_var)
+        return run_one_way_anova(
+            df,
+            dependent_var,
+            independent_vars[0]
+        )
 
-    elif test_name in ("Two-Way ANOVA",):
-        # Two-Way ANOVA handled same as One-Way for now — full interaction terms in future
-        return run_one_way_anova(df, dependent_var, grouping_var)
+    elif test_name == "Two-Way ANOVA":
+        return run_two_way_anova(
+            df,
+            dependent_var,
+            independent_vars[0],
+            independent_vars[1]
+    )
 
     elif test_name == "Mann-Whitney U Test":
         return run_mann_whitney(df, dependent_var, grouping_var)

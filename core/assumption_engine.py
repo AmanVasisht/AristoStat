@@ -720,7 +720,14 @@ def _dispatch_check(
         return check_normality_shapiro(series, assumption)
 
     elif fn_name == "check_normality_shapiro_by_group":
-        return check_normality_shapiro_by_group(cleaned_df, dep_var, grp_var, assumption)
+        # Two-Way ANOVA: grp_var is None, factors are in ind_vars
+        # Run normality check grouped by the interaction of both factors
+        effective_grp = grp_var
+        if effective_grp is None and len(ind_vars) >= 1:
+            effective_grp = ind_vars[0]  # check normality within first factor's groups
+        if effective_grp is None:
+            raise ValueError("No grouping variable available for normality by group check.")
+        return check_normality_shapiro_by_group(cleaned_df, dep_var, effective_grp, assumption)
 
     elif fn_name == "check_normality_of_differences":
         return check_normality_of_differences(
@@ -732,7 +739,22 @@ def _dispatch_check(
         return check_homoscedasticity_bp(cleaned_df, dep_var, ivars, assumption)
 
     elif fn_name == "check_homogeneity_levene":
-        return check_homogeneity_levene(cleaned_df, dep_var, grp_var, assumption)
+        # Two-Way ANOVA: create a combined group column for Levene's test
+        effective_grp = grp_var
+        if effective_grp is None and len(ind_vars) >= 2:
+            # Combine both factors into one interaction column
+            combined_col = "__twoway_group__"
+            cleaned_df = cleaned_df.copy()
+            cleaned_df[combined_col] = (
+                cleaned_df[ind_vars[0]].astype(str) + "_" +
+                cleaned_df[ind_vars[1]].astype(str)
+            )
+            effective_grp = combined_col
+        elif effective_grp is None and len(ind_vars) == 1:
+            effective_grp = ind_vars[0]
+        if effective_grp is None:
+            raise ValueError("No grouping variable available for Levene's test.")
+        return check_homogeneity_levene(cleaned_df, dep_var, effective_grp, assumption)
 
     elif fn_name == "check_multicollinearity_vif":
         return check_multicollinearity_vif(cleaned_df, ind_vars, assumption)
@@ -745,7 +767,12 @@ def _dispatch_check(
         return check_sample_size(cleaned_df, ind_vars, assumption)
 
     elif fn_name == "check_group_sample_sizes":
-        return check_group_sample_sizes(cleaned_df, dep_var, grp_var, assumption)
+        effective_grp = grp_var
+        if effective_grp is None and len(ind_vars) >= 1:
+            effective_grp = ind_vars[0]
+        if effective_grp is None:
+            raise ValueError("No grouping variable for sample size check.")
+        return check_group_sample_sizes(cleaned_df, dep_var, effective_grp, assumption)
 
     elif fn_name == "check_linearity_heuristic":
         x_col = ind_vars[0] if ind_vars else grp_var

@@ -263,7 +263,27 @@ def decide_test(
                 f"Multiple Linear Regression selected — predicting '{dependent_var}' "
                 f"from {len(independent_vars)} predictors."
             )
-
+    # ── FACTORIAL ANOVA (Two or More Categorical Predictors) ──
+    if (
+        goal == "inference"
+        and dep_dtype == "continuous"
+        and len(independent_vars) >= 2
+        and all(d == "categorical" for d in ind_dtypes)
+    ):
+        if len(independent_vars) == 2:
+            return (
+                "Two-Way ANOVA",
+                f"Two-Way ANOVA selected — analyzing the effect of "
+                f"'{independent_vars[0]}' and '{independent_vars[1]}' "
+                f"on '{dependent_var}'."
+            )
+        else:
+            return (
+                "Factorial ANOVA",
+                f"Factorial ANOVA selected — analyzing the effects of "
+                f"{len(independent_vars)} categorical predictors "
+                f"on '{dependent_var}'."
+            )
     # ── INFERENCE ──
     if (goal == "inference" or (dep_dtype == "continuous" and grp_dtype == "categorical")) and grouping_var:
         if n_groups == 2:
