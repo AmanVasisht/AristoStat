@@ -15,7 +15,7 @@ The system is designed around a core principle: **statistical reasoning should b
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=qxqWue2mDQc" target="_blank">
-    <img src="assets/Aristostat-disclaimer.png" alt="Aristostat Demo" width="800">
+    <img src="assets/Aristostat_disclaimer.png" alt="Aristostat Demo" width="800">
   </a>
 </p>
 
