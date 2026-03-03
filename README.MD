@@ -203,6 +203,8 @@ The core pipeline is functional across the currently supported test suite. Activ
 - **Visualisation** — inline chart generation (residual plots, Q-Q plots, coefficient plots) embedded in the report
 - **Multi-dataset support** — comparative analyses across datasets, longitudinal study designs
 
+
+⚠️ Note: This project is still actively being developed. There may be statistical inaccuracies present in certain scenarios; a more rigorous and in-depth implementation of statistical methods is currently in progress. Feedback and suggestions are always welcome!
 ---
 
 *Built with LangGraph · ChatGroq · FastAPI*
