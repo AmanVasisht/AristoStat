@@ -11,6 +11,17 @@ Aristostat is a multi-agent LangGraph pipeline that acts as an intelligent stati
 The system is designed around a core principle: **statistical reasoning should be transparent, explainable, and collaborative**, not a black box.
 
 ---
+## 🎥 Aristostat 5-Minute UI Demo
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=qxqWue2mDQc" target="_blank">
+    <img src="assets/Aristostat-disclaimer.png" alt="Aristostat Demo" width="800">
+  </a>
+</p>
+
+Click the image above to watch the full demo on YouTube.
+
+---
 
 ## Architecture
 
