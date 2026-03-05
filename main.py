@@ -36,8 +36,14 @@ from typing import TypedDict, Any
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt, Command
 from langgraph.checkpoint.memory import MemorySaver
+from langchain_groq import ChatGroq
+from langchain_core.messages import HumanMessage
 import time
 import io
+import traceback
+import re
+import json as _json
+import sys
 
 # ── Agent entry points ──
 from Agents.data_profiler            import run_data_profiler
@@ -53,7 +59,14 @@ from Agents.final_report             import run_final_report
 # ── Fitted model accessor ──
 from Tools.statistician import get_fitted_model
 from Schemas.methodologist import MethodologistOutput, SelectionMode
-
+from core.intent_engine import detect_explicit_test
+from Tools.rectification_strategist import (
+        init_rectification_store,
+        get_rectification_store,
+        accept_violation_and_proceed,
+    )
+from core.rectification_engine import build_rectification_output
+from Schemas.rectification_strategist import RectificationPhase
 
 # ─────────────────────────────────────────────
 # SERIALIZATION HELPERS
@@ -146,7 +159,6 @@ def node_data_profiler(state: AristostatState) -> AristostatState:
         filepath=state["csv_path"],
         user_message=state.get("user_query"),
     )
-    print("aaaaaaaaaaaaaaa",result)
     print(f"[NODE: data_profiler] profiler_output keys: {list(result.get('profiler_output', {}).keys())}")
     print(f"[NODE: data_profiler] fatal_errors: {result.get('profiler_output', {}).get('fatal_errors')}")
     print(f"[NODE: data_profiler] warnings count: {len(result.get('profiler_output', {}).get('warnings', []))}")
@@ -167,8 +179,6 @@ def node_data_profiler(state: AristostatState) -> AristostatState:
                 "_exit_analysis":True
                 }
     print(f"[NODE: data_profiler] profiler_serialized keys: {list(profiler_serialized.keys())}")
-    print("The final state in data profiler is:", state)
-    print("The final result in data profiler is:", result)
     return {
         **state,
         "raw_df":          _df_to_state(raw_df),
@@ -356,7 +366,7 @@ def node_methodologist_confirm(state: AristostatState) -> AristostatState:
     # ── User gave a correction ──
     print(f"[NODE: methodologist_confirm] User corrected: {user_response}")
 
-    from core.intent_engine import detect_explicit_test
+    
     canonical_test = detect_explicit_test(str(user_response))
     requested_test = canonical_test if canonical_test else str(user_response)
     print(f"[NODE: methodologist_confirm] Extracted test: {requested_test}")
@@ -580,11 +590,7 @@ def node_rectification_strategist_confirm(state: AristostatState) -> AristostatS
     print(f"[NODE: rectification_strategist_confirm] user response: {user_response}")
 
     # ── Reinitialise store so tools work correctly in confirm node ──
-    from Tools.rectification_strategist import (
-        init_rectification_store,
-        get_rectification_store,
-        accept_violation_and_proceed,
-    )
+    
 
     init_rectification_store(
         failed_assumptions=failed,
@@ -660,8 +666,7 @@ def node_rectification_strategist_confirm(state: AristostatState) -> AristostatS
         print(f"[NODE: rectification_strategist_confirm] removed: {columns_to_drop}")
         print(f"[NODE: rectification_strategist_confirm] remaining: {updated_ind_vars}")
 
-        from core.rectification_engine import build_rectification_output
-        from Schemas.rectification_strategist import RectificationPhase
+        
         ph = RectificationPhase(phase)
         _, applied_output = build_rectification_output(
             failed_assumptions=failed,
@@ -677,8 +682,7 @@ def node_rectification_strategist_confirm(state: AristostatState) -> AristostatS
 
     else:
         # ── All other solutions: test_switch, transform, correction ──
-        from core.rectification_engine import build_rectification_output
-        from Schemas.rectification_strategist import RectificationPhase
+        
         ph = RectificationPhase(phase)
         rectified_df, applied_output = build_rectification_output(
             failed_assumptions=failed,
@@ -841,7 +845,6 @@ def node_final_report(state: AristostatState) -> AristostatState:
         return {**state, "report_output": report_serialized}
 
     except Exception as e:
-        import traceback
         print(f"[NODE: final_report] ERROR: {str(e)}")
         print(traceback.format_exc())
     return {**state, "report_output": {}, "fatal_error": str(e)}
@@ -852,10 +855,8 @@ def node_final_report(state: AristostatState) -> AristostatState:
 # ─────────────────────────────────────────────
 
 def route_after_profiler(state: AristostatState) -> str:
-    if state.get("fatal_error"):
+    if state.get("fatal_error") or state.get("_exit_analysis"):
         return END
-    if state.get("_exit_analysis"):
-        return "final_report"
     return "intent_interpreter_run"
 
 
@@ -969,7 +970,6 @@ def _get_high_vif_variables(checker_output: dict) -> list[str]:
     Parses checker results to find variable names flagged with VIF >= 10.
     Used as a fallback suggestion in the confirm node.
     """
-    import re
     for result in checker_output.get("results", []):
         name   = result.get("name", "").lower()
         reason = result.get("plain_reason", "")
@@ -980,7 +980,7 @@ def _get_high_vif_variables(checker_output: dict) -> list[str]:
 
 
 def _llm_resolve_drop_intent(user_text: str, available_columns: list[str]) -> list[str]:
-    import json as _json
+    
     
     # ── First try simple string matching — no LLM needed ──
     user_lower = user_text.lower()
@@ -998,8 +998,6 @@ def _llm_resolve_drop_intent(user_text: str, available_columns: list[str]) -> li
 
     # ── Fallback to LLM only if string matching failed ──
     try:
-        from langchain_groq import ChatGroq
-        from langchain_core.messages import HumanMessage
         
         llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
 
@@ -1128,7 +1126,7 @@ def _get_interrupt(result: dict) -> dict | None:
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import sys
+    
 
     if len(sys.argv) < 3:
         print("Usage: python main.py <csv_path> <query>")
