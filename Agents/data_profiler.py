@@ -33,7 +33,6 @@ def _llm_summarise(profiler_output: dict, user_message: str = None) -> str:
     user_content = (
         f"Here is the profiler output as JSON:\n\n"
         f"{profiler_output}\n\n"
-        + (f"The user's analysis goal is: {user_message}" if user_message else "")
     )
 
     response = model.invoke([
