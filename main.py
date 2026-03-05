@@ -139,6 +139,8 @@ class AristostatState(TypedDict, total=False):
 def node_data_profiler(state: AristostatState) -> AristostatState:
     """Loads CSV, profiles dataset, shows stats to user."""
     print("\n[NODE: data_profiler] Starting...")
+    print("The initial state in data profiler is:", state)
+    
     result = run_data_profiler(
         filepath=state["csv_path"],
         user_message=state.get("user_query"),
@@ -147,12 +149,7 @@ def node_data_profiler(state: AristostatState) -> AristostatState:
     print(f"[NODE: data_profiler] fatal_errors: {result.get('profiler_output', {}).get('fatal_errors')}")
     print(f"[NODE: data_profiler] warnings count: {len(result.get('profiler_output', {}).get('warnings', []))}")
 
-    try:
-        raw_df = pd.read_csv(state["csv_path"])
-        print(f"[NODE: data_profiler] raw_df shape: {raw_df.shape}")
-    except Exception as e:
-        print(f"[NODE: data_profiler] ERROR loading csv: {e}")
-        raw_df = None
+    raw_df = pd.read_csv(state["csv_path"])
 
     user_response = interrupt({
         "message": result["final_response"],
@@ -166,7 +163,8 @@ def node_data_profiler(state: AristostatState) -> AristostatState:
 
     profiler_serialized = _serialize_output(result["profiler_output"])
     print(f"[NODE: data_profiler] profiler_serialized keys: {list(profiler_serialized.keys())}")
-
+    print("The final state in data profiler is:", state)
+    print("The final result in data profiler is:", result)
     return {
         **state,
         "raw_df":          _df_to_state(raw_df),
@@ -179,6 +177,7 @@ def node_data_profiler(state: AristostatState) -> AristostatState:
 def node_intent_interpreter_run(state: AristostatState) -> AristostatState:
     """Runs intent interpreter LLM — no interrupts."""
     print("\n[NODE: intent_interpreter_run] Starting...")
+    print("The complete state result for this is:",state)
     print(f"[NODE: intent_interpreter_run] user_query: {state.get('user_query')}")
     print(f"[NODE: intent_interpreter_run] profiler_output keys: {list(state.get('profiler_output', {}).keys())}")
     
@@ -187,7 +186,7 @@ def node_intent_interpreter_run(state: AristostatState) -> AristostatState:
         user_query=state["user_query"],
         profiler_output=state["profiler_output"],
     )
-
+    print("The complete result is:",result)
     print(f"[NODE: intent_interpreter_run] result keys: {list(result.keys())}")
     intent = result.get("intent_output", {})
     print(f"[NODE: intent_interpreter_run] raw intent_output: {intent}")
@@ -222,6 +221,7 @@ def node_intent_interpreter_confirm(state: AristostatState) -> AristostatState:
     # ── Open-ended: user picks a suggested combination ──
     intent = state.get("intent_output", {})
     intent_type = intent.get("intent_type")
+    print("The state in intent interpreter confirm is:",state)
     if intent_type == "open_ended" and intent.get("suggested_combinations"):
         combo_response = interrupt({
             "message": state.get("_intent_response", ""),
@@ -232,10 +232,12 @@ def node_intent_interpreter_confirm(state: AristostatState) -> AristostatState:
         chosen_query = _resolve_combination_choice(
             combo_response, intent["suggested_combinations"]
         )
+        print("The chosen query is:",chosen_query)
         result = run_intent_interpreter(
             user_query=chosen_query,
             profiler_output=state["profiler_output"],
         )
+        print("1111111 the result for this is :",result)
         intent_serialized = _serialize_output(result.get("intent_output", {}))
         return {
             **state,
@@ -259,6 +261,7 @@ def node_intent_interpreter_confirm(state: AristostatState) -> AristostatState:
         user_query=str(user_response),
         profiler_output=state["profiler_output"],
     )
+    print("22222222222 the result for this is :",corrected_result)
     corrected_intent = _serialize_output(corrected_result.get("intent_output", {}))
     print(f"[NODE: intent_interpreter_confirm] corrected: {corrected_intent}")
     return {**state, "intent_output": corrected_intent}
@@ -270,6 +273,7 @@ def node_methodologist_run(state: AristostatState) -> AristostatState:
     """Runs methodologist LLM — no interrupts."""
     print("\n[NODE: methodologist_run] Starting...")
     state = {**state, "_methodologist_rerun": False}
+    print("The complete state while going to the methologist is:", state)
     print(f"[NODE: methodologist_run] intent_output: {state.get('intent_output')}")
     intent = state.get("intent_output", {})
     if intent.get("methodologist_bypass") and intent.get("requested_test"):

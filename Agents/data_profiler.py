@@ -1,86 +1,72 @@
-from typing import Any
+"""
+FILE: Agents/data_profiler.py
+------------------------------
+Deterministic data profiler — no ReAct loop.
+Python handles all computation, LLM is called once for summarisation only.
+"""
 
+import pandas as pd
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage
-from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import HumanMessage, SystemMessage
 
-from Prompts.data_profiler import DATA_PROFILER_SYSTEM_PROMPT
-from Tools.data_profiler import DATA_PROFILER_TOOLS, get_dataframe_store
 from core.profiler_engine import profile_dataframe
+from Prompts.data_profiler import DATA_PROFILER_SYSTEM_PROMPT
 
 
 # ─────────────────────────────────────────────
-# LLM
+# LLM — single instance, used only for summary
 # ─────────────────────────────────────────────
 
-from langchain_groq import ChatGroq
-model = ChatGroq(
-    model="llama-3.1-8b-instant",
-    temperature=0
-)# ─────────────────────────────────────────────
-# AGENT FACTORY
+model = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
+
+
+# ─────────────────────────────────────────────
+# PRIVATE — LLM summarisation call
 # ─────────────────────────────────────────────
 
-def create_data_profiler_agent():
+def _llm_summarise(profiler_output: dict, user_message: str = None) -> str:
     """
-    Create and return the Data Profiler ReAct agent.
-    Called fresh for each invocation to avoid stale state.
+    Single LLM call — receives the real profiler_output dict and
+    generates a human-readable summary. Numbers come from Python,
+    not from LLM reasoning.
     """
-    return create_react_agent(
-        model=model,
-        tools=DATA_PROFILER_TOOLS,
-        prompt=DATA_PROFILER_SYSTEM_PROMPT
+    user_content = (
+        f"Here is the profiler output as JSON:\n\n"
+        f"{profiler_output}\n\n"
+        + (f"The user's analysis goal is: {user_message}" if user_message else "")
     )
+
+    response = model.invoke([
+        SystemMessage(content=DATA_PROFILER_SYSTEM_PROMPT),
+        HumanMessage(content=user_content),
+    ])
+
+    return response.content
 
 
 # ─────────────────────────────────────────────
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
 
-def run_data_profiler(filepath: str, user_message: str = None) -> dict[str, Any]:
+def run_data_profiler(filepath: str, user_message: str = None) -> dict:
     """
-    Entry point called by the LangGraph orchestrator (main.py).
-
-    Args:
-        filepath:     Path to the CSV file uploaded by the user.
-        user_message: Optional analysis goal stated by the user.
-                      If None, a generic profiling request is sent.
-
-    Returns:
-        {
-          "messages":       Full LangGraph message history (for state passing).
-          "final_response": Human-readable summary string from the agent.
-          "profiler_output": Raw ProfilerOutput dict for downstream agents.
-        }
+    Entry point called by the LangGraph orchestrator.
+    
+    1. Load CSV with pandas — deterministic
+    2. Run profiler engine — deterministic  
+    3. Call LLM once for summary — single call, no tool loop
     """
-    agent = create_data_profiler_agent()
+    # Step 1 — Load
+    df = pd.read_csv(filepath)
 
-    content = (
-        f"Please profile this dataset for me.\n"
-        f"File path: {filepath}\n"
-        + (f"My analysis goal: {user_message}" if user_message else "")
-    )
+    # Step 2 — Profile (pure Python, no LLM)
+    profiler_result = profile_dataframe(df)
+    profiler_output_dict = profiler_result.model_dump()
 
-    result = agent.invoke({"messages": [HumanMessage(content=content)]})
-    # ── Extract final human-readable response ──
-    final_response = ""
-    for msg in reversed(result["messages"]):
-        if hasattr(msg, "content") and msg.__class__.__name__ == "AIMessage":
-            final_response = msg.content
-            break
-
-    # ── Build raw profiler output dict for downstream agents ──
-    # Re-runs the pure engine (no LLM cost) on the already-loaded DataFrame.
-    profiler_output_dict = {}
-    store = get_dataframe_store()
-    if "current" in store:
-        try:
-            profiler_output_dict = profile_dataframe(store["current"]).model_dump()
-        except Exception:
-            pass
+    # Step 3 — Summarise (single LLM call)
+    final_response = _llm_summarise(profiler_output_dict, user_message)
 
     return {
-        "messages": result["messages"],
         "final_response": final_response,
         "profiler_output": profiler_output_dict,
     }
