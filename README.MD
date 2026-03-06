@@ -66,8 +66,8 @@ Agents are split into two architectural patterns based on their cognitive requir
 
 | Pattern | Agents | Rationale |
 |---|---|---|
-| **ReAct (Tool-calling loop)** | Data Profiler, Intent Interpreter, Methodologist, Assumption Checker, Rectification Strategist, Final Report | Require multi-step reasoning, tool invocation, and iterative decision-making. The ReAct loop allows the agent to gather context, reason about it, and act — rather than making a single-shot inference. |
-| **Direct calling** | Preprocessor, Statistician, Model Critic | Execute deterministic or well-scoped tasks where tool-use overhead adds no value. Faster, cheaper, and more reliable for structured computation. |
+| **ReAct (Tool-calling loop)** | Intent Interpreter, Methodologist, Assumption Checker, Rectification Strategist, Final Report | Require multi-step reasoning, tool invocation, and iterative decision-making. The ReAct loop allows the agent to gather context, reason about it, and act — rather than making a single-shot inference. |
+| **Direct calling** |  Data Profiler, Preprocessor, Statistician, Model Critic | Execute deterministic or well-scoped tasks where tool-use overhead adds no value. Faster, cheaper, and more reliable for structured computation. |
 
 ---
 
