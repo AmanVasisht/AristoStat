@@ -9,8 +9,7 @@ parse the user's query into a structured intent object.
 import json
 from langchain_core.tools import tool
 
-from core.intent_engine import build_intent_output, detect_explicit_test, build_column_type_map
-from Schemas.intent_interpreter import IntentOutput
+from core.intent_engine import build_intent_output, detect_explicit_test
 
 
 # ─────────────────────────────────────────────

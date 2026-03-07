@@ -7,7 +7,6 @@ Generates a comprehensive Word document with ALL pipeline data.
 
 import json
 import os
-import pandas as pd
 from langchain_core.tools import tool
 
 from core.final_report_engine import assemble_report
