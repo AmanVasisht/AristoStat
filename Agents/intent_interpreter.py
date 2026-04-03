@@ -17,6 +17,8 @@ from typing import Any
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
+from langsmith import traceable, get_current_run_tree
+
 
 from Prompts.intent_interpreter import INTENT_INTERPRETER_SYSTEM_PROMPT
 from Tools.intent_interpreter import (
@@ -55,6 +57,12 @@ def create_intent_interpreter_agent():
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
 
+
+@traceable(
+    name="intent_interpreter",
+    tags=["agent", "react", "intent-parsing"],
+    metadata={"agent_pattern": "react", "model": "qwen3-32b"}
+)
 def run_intent_interpreter(
     profiler_output: dict,
     user_query: str,
@@ -99,7 +107,17 @@ def run_intent_interpreter(
     store = get_intent_store()
     intent_output = store.get("intent_output")
     intent_output_dict = intent_output.model_dump() if intent_output else {}
-
+    # ── LangSmith metadata ──
+    run = get_current_run_tree()
+    if run:
+        run.add_metadata({
+            "user_query": user_query,
+            "analysis_type": intent_output_dict.get("analysis_type"),
+            "target_variable": intent_output_dict.get("target_variable"),
+            "predictor_variables": intent_output_dict.get("predictor_variables"),
+            "methodologist_bypass": intent_output_dict.get("methodologist_bypass", False),
+            "react_steps": len(result["messages"]),
+        })
     return {
         "messages": result["messages"],
         "final_response": final_response,

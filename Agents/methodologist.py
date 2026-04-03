@@ -17,6 +17,7 @@ from typing import Any
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
+from langsmith import traceable, get_current_run_tree
 
 from Prompts.methodologist import METHODOLOGIST_SYSTEM_PROMPT
 from Tools.methodologist import (
@@ -30,8 +31,8 @@ from Tools.methodologist import (
 # LLM
 # ─────────────────────────────────────────────
 
-from langchain_groq import ChatGroq
 model = ChatGroq(model="qwen/qwen3-32b", temperature=0)
+
 
 # ─────────────────────────────────────────────
 # AGENT FACTORY
@@ -53,6 +54,11 @@ def create_methodologist_agent():
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
 
+@traceable(
+    name="methodologist",
+    tags=["agent", "react", "test-selection"],
+    metadata={"agent_pattern": "react", "model": "qwen3-32b"}
+)
 def run_methodologist(
     intent_output: dict,
     profiler_output: dict,
@@ -99,9 +105,19 @@ def run_methodologist(
         methodologist_output.model_dump() if methodologist_output else {}
     )
 
+    # ── LangSmith metadata ──
+    run = get_current_run_tree()
+    if run:
+        run.add_metadata({
+            "selected_test": methodologist_output_dict.get("selected_test"),
+            "test_family": methodologist_output_dict.get("test_family"),
+            "mismatch_warning": methodologist_output_dict.get("mismatch_warning"),
+            "bypass_used": intent_output.get("methodologist_bypass", False),
+            "react_steps": len(result["messages"]),
+        })
+
     return {
         "messages": result["messages"],
         "final_response": final_response,
         "methodologist_output": methodologist_output_dict,
     }
-
