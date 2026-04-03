@@ -131,7 +131,7 @@ Different agents are assigned models based on their reasoning complexity and lat
 
 | Model | Used For |
 |---|---|
-| `meta-llama/llama-4-maverick-17b-128e-instruct` | High-stakes reasoning — Methodologist, Rectification Strategist, Final Report |
+| `meta-llama/llama-4-maverick-17b-128e-instruct` | High-stakes reasoning — Final Report |
 | `qwen/qwen3-32b` | Semantic resolution tasks — intent parsing, column mapping |
 | `llama-3.1-8b-instant` | Fast, low-cost tasks — intent classification, light reasoning |
 
