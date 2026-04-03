@@ -38,6 +38,8 @@ from langgraph.types import interrupt, Command
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
+from langsmith import Client
+from langchain_core.tracers.context import tracing_v2_enabled
 import time
 import io
 import traceback
@@ -1080,7 +1082,12 @@ def build_graph() -> StateGraph:
 # ─────────────────────────────────────────────
 
 graph = build_graph()
+# Calling the langsmith client
+client = Client()
 
+def run_pipeline(inputs):
+    with tracing_v2_enabled(project_name="aristostat"):
+        return graph.invoke(inputs)
 
 def run_aristostat(
     csv_path: str,

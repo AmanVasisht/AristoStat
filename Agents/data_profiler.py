@@ -11,6 +11,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from core.profiler_engine import profile_dataframe
 from Prompts.data_profiler import DATA_PROFILER_SYSTEM_PROMPT
+from langsmith import traceable, get_current_run_tree
+
 
 
 # ─────────────────────────────────────────────
@@ -46,7 +48,11 @@ def _llm_summarise(profiler_output: dict, user_message: str = None) -> str:
 # ─────────────────────────────────────────────
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
-
+@traceable(
+    name="data_profiler",
+    tags=["agent", "direct-call", "profiling"],
+    metadata={"agent_pattern": "direct"}
+)
 def run_data_profiler(filepath: str, user_message: str = None) -> dict:
     """
     Entry point called by the LangGraph orchestrator.
@@ -64,6 +70,15 @@ def run_data_profiler(filepath: str, user_message: str = None) -> dict:
 
     # Step 3 — Summarise (single LLM call)
     final_response = _llm_summarise(profiler_output_dict, user_message)
+
+    run = get_current_run_tree()
+    if run:
+        run.add_metadata({
+            "rows": df.shape[0],
+            "columns": df.shape[1],
+            "column_names": df.columns.tolist(),
+            "missing_cells": int(df.isnull().sum().sum()),
+        })
 
     return {
         "final_response": final_response,
