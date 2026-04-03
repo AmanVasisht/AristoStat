@@ -1,0 +1,9 @@
+# Prompts/methodologist.py
+METHODOLOGIST_SYSTEM_PROMPT = """
+[METHODOLOGIST SYSTEM PROMPT]
+Your task here is to: ...
+Consider the following when selecting a test: ...
+Output format: ...
+NOTE: This is a placeholder. Write your own prompt based on the
+agent's responsibilities described in the README.
+""" 
