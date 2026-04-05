@@ -22,6 +22,7 @@ import pandas as pd
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
+from langsmith import traceable, get_current_run_tree
 
 from Prompts.final_report import FINAL_REPORT_SYSTEM_PROMPT
 from Tools.final_report import (
@@ -35,8 +36,9 @@ from Tools.final_report import (
 # LLM
 # ─────────────────────────────────────────────
 
-from langchain_groq import ChatGroq
 model = ChatGroq(model="meta-llama/llama-4-maverick-17b-128e-instruct", temperature=0)
+
+
 # ─────────────────────────────────────────────
 # AGENT FACTORY
 # ─────────────────────────────────────────────
@@ -54,6 +56,11 @@ def create_final_report_agent():
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
 
+@traceable(
+    name="final_report",
+    tags=["agent", "react", "report-generation"],
+    metadata={"agent_pattern": "react", "model": "llama-4-maverick-17b"}
+)
 def run_final_report(
     original_query: str,
     profiler_output: dict,
@@ -118,9 +125,31 @@ def run_final_report(
     report_output = store.get("report_output")
     report_output_dict = report_output.model_dump() if report_output else {}
 
+    # ── LangSmith metadata ──
+    run = get_current_run_tree()
+    if run:
+        # Summarise what the full pipeline went through — visible on this terminal trace
+        p_value = statistician_output.get("p_value")
+
+        run.add_metadata({
+            # Report generation health
+            "docx_generated": report_output_dict.get("docx_generated", False),
+            "docx_path": report_output_dict.get("docx_path"),
+            "caveats_count": len(report_output_dict.get("caveats", [])),
+            "react_steps": len(result["messages"]),
+
+            # Full pipeline summary — useful for end-to-end filtering
+            "original_query": original_query,
+            "test_executed": statistician_output.get("test_name"),
+            "p_value": p_value,
+            "significant": p_value < 0.05 if p_value is not None else None,
+            "rectification_occurred": rectification_output is not None,
+            "critic_occurred": critic_output is not None,
+            "assumption_failures": checker_output.get("failed_count", 0),
+        })
+
     return {
         "messages":       result["messages"],
         "final_response": final_response,
         "report_output":  report_output_dict,
     }
-
