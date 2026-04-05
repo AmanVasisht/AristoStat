@@ -23,6 +23,7 @@ from typing import Any
 import pandas as pd
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
+from langsmith import traceable, get_current_run_tree
 
 from Tools.statistician import (
     STATISTICIAN_TOOLS,
@@ -47,6 +48,11 @@ model = ChatGroq(
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
 
+@traceable(
+    name="statistician",
+    tags=["agent", "direct-call", "test-execution"],
+    metadata={"agent_pattern": "direct", "model": "llama-3.1-8b-instant"}
+)
 def run_statistician(
     methodologist_output: dict,
     cleaned_df: pd.DataFrame,
@@ -66,17 +72,19 @@ def run_statistician(
     )
 
     # ── Resolve test parameters ──
-    rect      = rectification_output or {}
-    test_name = rect.get("new_test") or methodologist_output.get("selected_test")
-    dep_var   = methodologist_output.get("dependent_variable")
-    ind_vars  = methodologist_output.get("independent_variables", [])
-    grp_var   = methodologist_output.get("grouping_variable")
+    rect       = rectification_output or {}
+    test_name  = rect.get("new_test") or methodologist_output.get("selected_test")
+    dep_var    = methodologist_output.get("dependent_variable")
+    ind_vars   = methodologist_output.get("independent_variables", [])
+    grp_var    = methodologist_output.get("grouping_variable")
     correction = rect.get("correction_type")
 
     # ── Execute test directly via engine ──
     statistician_output = None
     fitted_model = None
     final_response = ""
+    test_failed = False
+    error_message = None
 
     try:
         output, fitted_model = run_test(
@@ -106,12 +114,41 @@ def run_statistician(
 
     except Exception as e:
         import traceback
-        print(traceback.format_exc())       # ← shows full stack trace
+        print(traceback.format_exc())
         final_response = f"Test execution failed: {str(e)}"
+        test_failed = True
+        error_message = str(e)
 
     statistician_output_dict = (
         statistician_output.model_dump() if statistician_output else {}
     )
+
+    # ── LangSmith metadata ──
+    run = get_current_run_tree()
+    if run:
+        p_value = statistician_output_dict.get("p_value")
+        
+        run.add_metadata({
+            # Test identity — was rectification applied?
+            "test_executed": test_name,
+            "original_test": methodologist_output.get("selected_test"),
+            "rectification_applied": bool(rect.get("new_test")),
+            "correction_type": correction,
+
+            # Core results — the most queryable fields across runs
+            "p_value": p_value,
+            "significant": p_value < 0.05 if p_value is not None else None,
+            "test_statistic": statistician_output_dict.get("statistic"),
+            "effect_size": statistician_output_dict.get("effect_size"),
+
+            # Regression-specific — only populated for regression tests
+            "r_squared": statistician_output_dict.get("r_squared"),
+            "adj_r_squared": statistician_output_dict.get("adj_r_squared"),
+
+            # Execution health
+            "test_failed": test_failed,
+            "error_message": error_message,
+        })
 
     return {
         "messages":            [],

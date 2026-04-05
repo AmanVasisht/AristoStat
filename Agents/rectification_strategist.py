@@ -25,6 +25,7 @@ import pandas as pd
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
+from langsmith import traceable, get_current_run_tree
 
 from Prompts.rectification_strategist import RECTIFICATION_STRATEGIST_SYSTEM_PROMPT
 from Tools.rectification_strategist import (
@@ -57,6 +58,11 @@ def create_rectification_agent():
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
 
+@traceable(
+    name="rectification_strategist",
+    tags=["agent", "react", "rectification"],
+    metadata={"agent_pattern": "react", "model": "qwen3-32b"}
+)
 def run_rectification_strategist(
     failed_assumptions: list[str],
     phase: str,
@@ -96,8 +102,6 @@ def run_rectification_strategist(
 
     agent = create_rectification_agent()
 
-    # The agent's task: use tools to understand the situation and produce a recommendation.
-    # It does NOT apply a solution here — that happens after the user confirms in main.py.
     content = (
         f"Assumption failures detected during "
         f"{'pre-test' if phase == 'pre_test' else 'post-test'} checking.\n\n"
@@ -123,13 +127,11 @@ def run_rectification_strategist(
                 final_response = msg.content
                 break
 
-    # ── Pull rectification_output from store (proposals only, no solution applied yet) ──
+    # ── Pull rectification_output from store ──
     store = get_rectification_store()
     rect_output = store.get("rectification_output")
     rect_output_dict = rect_output.model_dump() if rect_output else {}
 
-    # If agent didn't call apply_chosen_solution, rect_output may be None.
-    # Build proposals-only output so confirm node has the solution list.
     if not rect_output_dict.get("proposed_solutions"):
         from Schemas.rectification_strategist import RectificationPhase as RP
         from core.rectification_engine import build_rectification_output
@@ -148,6 +150,40 @@ def run_rectification_strategist(
             max_attempts=max_attempts,
         )
         rect_output_dict = proposals_output.model_dump()
+
+    # ── LangSmith metadata ──
+    run = get_current_run_tree()
+    if run:
+        proposed_solutions = rect_output_dict.get("proposed_solutions", [])
+
+        run.add_metadata({
+            # Phase context — pre_test vs post_test tells you which loop triggered this
+            "phase": phase,
+            "rectification_attempt": rectification_attempt,
+            "max_attempts": max_attempts,
+            "at_attempt_limit": rectification_attempt >= max_attempts,
+
+            # What failed — the reason this agent was invoked
+            "failed_assumptions": failed_assumptions,
+            "failed_count": len(failed_assumptions),
+            "original_test": methodologist_output.get("selected_test"),
+
+            # What solutions were proposed
+            "proposed_solutions_count": len(proposed_solutions),
+            "proposed_solution_ids": [
+                s.get("solution_id") for s in proposed_solutions
+            ],
+
+            # Solution applied (if agent called apply_chosen_solution)
+            "solution_applied": rect_output_dict.get("chosen_solution_id"),
+            "test_switched": rect_output_dict.get("test_switched", False),
+            "new_test": rect_output_dict.get("new_test"),
+            "columns_dropped": rect_output_dict.get("columns_dropped", []),
+            "transformation_applied": rect_output_dict.get("transformation_applied"),
+
+            # ReAct loop depth — useful for spotting runaway loops
+            "react_steps": len(result["messages"]),
+        })
 
     return {
         "messages":             result["messages"],

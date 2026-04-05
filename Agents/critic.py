@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
+from langsmith import traceable, get_current_run_tree
 
 from core.critic_engine import run_post_test_checks
 
@@ -28,6 +29,11 @@ model = ChatGroq(
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
 
+@traceable(
+    name="model_critic",
+    tags=["agent", "direct-call", "post-test-diagnostics"],
+    metadata={"agent_pattern": "direct", "model": "llama-3.1-8b-instant"}
+)
 def run_model_critic(
     statistician_output: dict,
     fitted_model: object | None,
@@ -78,6 +84,35 @@ Warning count: {critic_output.warning_count}"""
 
         response = model.invoke([HumanMessage(content=format_prompt)])
         final_response = response.content.strip()
+
+    # ── LangSmith metadata ──
+    run = get_current_run_tree()
+    if run:
+        checks = critic_output_dict.get("checks", [])
+        failed_checks = [c for c in checks if not c.get("passed")]
+        warned_checks = [c for c in checks if c.get("warning")]
+
+        run.add_metadata({
+            # Test context
+            "test_name": test_name,
+            "test_family": test_family,
+
+            # Applicability — tells you how often critic actually ran vs was skipped
+            "checks_applicable": critic_output.checks_applicable,
+            "fitted_model_present": fitted_model is not None,
+
+            # Diagnostic results
+            "checks_run": len(checks),
+            "passed_count": critic_output_dict.get("passed_count", 0),
+            "failed_count": critic_output.failed_count,
+            "warning_count": critic_output.warning_count,
+            "failed_checks": [c.get("check_name") for c in failed_checks],
+            "warned_checks": [c.get("check_name") for c in warned_checks],
+
+            # Routing signal — does the graph loop back to rectification?
+            "has_failures": critic_output.has_failures,
+            "rectification_triggered": critic_output.has_failures and critic_output.checks_applicable,
+        })
 
     return {
         "messages":       [],
