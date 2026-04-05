@@ -24,6 +24,7 @@ from typing import Any
 import pandas as pd
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
+from langsmith import traceable, get_current_run_tree
 
 from core.preprocessor_engine import preprocess_dataframe
 
@@ -42,6 +43,11 @@ model = ChatGroq(
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
 
+@traceable(
+    name="preprocessor",
+    tags=["agent", "direct-call", "preprocessing"],
+    metadata={"agent_pattern": "direct", "model": "llama-3.1-8b-instant"}
+)
 def run_preprocessor(
     raw_df: pd.DataFrame,
     profiler_output: dict,
@@ -51,6 +57,10 @@ def run_preprocessor(
     Calls the preprocessor engine directly — no LLM needed for cleaning.
     The LLM is only used to format the final human-readable summary.
     """
+    # ── Capture shape before cleaning ──
+    rows_before = len(raw_df)
+    cols_before = len(raw_df.columns)
+
     cleaned_df, preprocessor_output = preprocess_dataframe(
         df=raw_df,
         profiler_output=profiler_output,
@@ -80,10 +90,24 @@ Rows dropped: {preprocessor_output.rows_dropped_total}"""
         response = model.invoke([HumanMessage(content=summary_prompt)])
         final_response = response.content.strip()
 
+    # ── LangSmith metadata ──
+    run = get_current_run_tree()
+    if run:
+        run.add_metadata({
+            "rows_before": rows_before,
+            "cols_before": cols_before,
+            "rows_after": len(cleaned_df),
+            "cols_after": len(cleaned_df.columns),
+            "rows_dropped": preprocessor_output.rows_dropped_total,
+            "changes_made": len(changes) if changes else 0,
+            "warnings_count": len(warnings) if warnings else 0,
+            "fatal_error": bool(fatal),
+            "cleaning_required": bool(changes),
+        })
+
     return {
         "messages":            [],
         "final_response":      final_response,
         "preprocessor_output": preprocessor_output_dict,
         "cleaned_df":          cleaned_df,
     }
-

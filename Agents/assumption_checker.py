@@ -19,6 +19,7 @@ import pandas as pd
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
+from langsmith import traceable, get_current_run_tree
 
 from Prompts.assumption_checker import ASSUMPTION_CHECKER_SYSTEM_PROMPT
 from Tools.assumption_checker import (
@@ -31,7 +32,7 @@ from Tools.assumption_checker import (
 # ─────────────────────────────────────────────
 # LLM
 # ─────────────────────────────────────────────
-from langchain_groq import ChatGroq
+
 model = ChatGroq(
     model="qwen/qwen3-32b",
     temperature=0
@@ -55,6 +56,11 @@ def create_assumption_checker_agent():
 # PUBLIC ENTRY POINT
 # ─────────────────────────────────────────────
 
+@traceable(
+    name="assumption_checker",
+    tags=["agent", "react", "assumption-checking"],
+    metadata={"agent_pattern": "react", "model": "qwen3-32b"}
+)
 def run_assumption_checker(
     methodologist_output: dict,
     cleaned_df: pd.DataFrame,
@@ -104,9 +110,37 @@ def run_assumption_checker(
     checker_output = store.get("checker_output")
     checker_output_dict = checker_output.model_dump() if checker_output else {}
 
+    # ── LangSmith metadata ──
+    run = get_current_run_tree()
+    if run:
+        results = checker_output_dict.get("results", [])
+        passed = [r for r in results if r.get("passed")]
+        failed = [r for r in results if not r.get("passed")]
+        pending = checker_output_dict.get("pending_manual_confirmations", [])
+
+        run.add_metadata({
+            # Test context
+            "test_name": methodologist_output.get("selected_test"),
+
+            # Assumption results
+            "assumptions_run": len(results),
+            "passed_count": len(passed),
+            "failed_count": len(failed),
+            "passed_assumptions": [r.get("assumption_name") for r in passed],
+            "failed_assumptions": [r.get("assumption_name") for r in failed],
+
+            # Routing flags — most important for debugging graph flow
+            "has_failures": checker_output_dict.get("has_failures", False),
+            "proceed_to_statistician": checker_output_dict.get("proceed_to_statistician", False),
+            "pending_manual_confirmations": pending,
+            "manual_confirmation_required": len(pending) > 0,
+
+            # ReAct loop depth
+            "react_steps": len(result["messages"]),
+        })
+
     return {
         "messages":       result["messages"],
         "final_response": final_response,
         "checker_output": checker_output_dict,
     }
-
