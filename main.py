@@ -38,8 +38,7 @@ from langgraph.types import interrupt, Command
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
-from langsmith import Client
-from langchain_core.tracers.context import tracing_v2_enabled
+from langsmith import traceable
 import time
 import io
 import traceback
@@ -69,6 +68,7 @@ from Tools.rectification_strategist import (
     )
 from core.rectification_engine import build_rectification_output
 from Schemas.rectification_strategist import RectificationPhase
+from constants.assumption_checker import TEST_VARIABLE_CONSTRAINTS
 
 # ─────────────────────────────────────────────
 # SERIALIZATION HELPERS
@@ -292,6 +292,7 @@ def node_methodologist_run(state: AristostatState) -> AristostatState:
     print("The complete state while going to the methologist is:", state)
     print(f"[NODE: methodologist_run] intent_output: {state.get('intent_output')}")
     intent = state.get("intent_output", {})
+
     if intent.get("methodologist_bypass") and intent.get("requested_test"):
 
         selected_test = intent["requested_test"]
@@ -307,29 +308,85 @@ def node_methodologist_run(state: AristostatState) -> AristostatState:
             if c["role"] == "independent"
         ]
 
-        # Build REAL schema object (not manual dict)
+        # ── Validate variable count against test constraints ──
+        constraint = TEST_VARIABLE_CONSTRAINTS.get(selected_test, {})
+        max_ind = constraint.get("max_independent")
+
+        if max_ind is not None and len(independents) > max_ind:
+            if max_ind == 0:
+                # No resolution possible — truly fatal
+                explanation = (
+                    f"{selected_test} does not use independent variables — "
+                    f"it tests a single group against a fixed value."
+                )
+                print(f"[NODE: methodologist_run] Variable constraint violation: {explanation}")
+                return {**state, "fatal_error": explanation}
+
+            # ── Ask user to pick one variable instead of killing pipeline ──
+            explanation = (
+                f"{selected_test} accepts exactly {max_ind} independent variable(s), "
+                f"but {len(independents)} were found: {', '.join(independents)}.\n"
+                f"Please type the name of the single predictor you want to use."
+            )
+            print(f"[NODE: methodologist_run] Variable constraint violation — prompting user.")
+
+            chosen = interrupt({
+                "message": explanation,
+                "prompt":  f"Which single variable from {independents} do you want to use?",
+                "type":    "confirm",
+            })
+
+            # ── Resolve chosen variable ──
+            chosen_str = str(chosen).strip()
+            resolved = _llm_resolve_drop_intent(chosen_str, independents)
+            single_var = resolved[0] if resolved else (
+                chosen_str if chosen_str in independents else independents[0]
+            )
+            print(f"[NODE: methodologist_run] User picked: {single_var}")
+
+            # ── Rebuild with single predictor ──
+            methodologist_output_obj = MethodologistOutput(
+                selected_test=selected_test,
+                selection_mode=SelectionMode.BYPASS,
+                dependent_variable=dependent,
+                independent_variables=[single_var],
+                reasoning=(
+                    f"Using {selected_test} with {single_var} as the sole predictor, "
+                    f"as per user's explicit request."
+                ),
+                original_query=intent.get("original_query", "")
+            )
+
+            structured_output = methodologist_output_obj.model_dump()
+            print(f"[NODE: methodologist_run] resolved to single predictor: {single_var}")
+
+            return {
+                **state,
+                "methodologist_output":    structured_output,
+                "_methodologist_response": (
+                    f"Using {selected_test} with '{single_var}' as the independent variable."
+                ),
+            }
+
+        # ── No constraint violation — proceed normally ──
         methodologist_output_obj = MethodologistOutput(
             selected_test=selected_test,
-
-            # IMPORTANT: must use enum
             selection_mode=SelectionMode.BYPASS,
-
             dependent_variable=dependent,
             independent_variables=independents,
-
             reasoning=f"Using {selected_test} based on user's explicit request.",
-
             original_query=intent.get("original_query", "")
         )
 
         structured_output = methodologist_output_obj.model_dump()
 
+        print(f"[NODE: methodologist_run] bypass — selected_test: {selected_test}, independents: {independents}")
         return {
             **state,
-            "methodologist_output": structured_output,
-            "_methodologist_response":
-                f"Using {selected_test} based on your explicit request."
+            "methodologist_output":    structured_output,
+            "_methodologist_response": f"Using {selected_test} based on your explicit request.",
         }
+
     result = run_methodologist(
         intent_output=state["intent_output"],
         profiler_output=state["profiler_output"],
@@ -849,7 +906,7 @@ def node_final_report(state: AristostatState) -> AristostatState:
     except Exception as e:
         print(f"[NODE: final_report] ERROR: {str(e)}")
         print(traceback.format_exc())
-    return {**state, "report_output": {}, "fatal_error": str(e)}
+        return {**state, "report_output": {}, "fatal_error": str(e)}
 
 
 # ─────────────────────────────────────────────
@@ -1082,19 +1139,22 @@ def build_graph() -> StateGraph:
 # ─────────────────────────────────────────────
 
 graph = build_graph()
-# Calling the langsmith client
-client = Client()
-
-def run_pipeline(inputs):
-    with tracing_v2_enabled(project_name="aristostat"):
-        return graph.invoke(inputs)
 
 def run_aristostat(
     csv_path: str,
     user_query: str,
     thread_id: str = "default",
 ) -> dict[str, Any]:
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "run_name": "aristostat_pipeline",      # ← this names the trace in LangSmith
+        "tags": ["pipeline", "full-run"],        # ← these appear as tags
+        "metadata": {                            # ← this appears in metadata tab
+            "version": "1.0",
+            "csv_path": csv_path,
+            "user_query": user_query,
+        }
+    }
     initial_state: AristostatState = {
         "csv_path":                csv_path,
         "user_query":              user_query,
@@ -1105,19 +1165,22 @@ def run_aristostat(
         "critic_output":           None,
         "rectified_df":            None,
         "user_rectify_or_proceed": "proceed",
-        "preprocessor_output":  None,
-        "methodologist_output": None,
-        "checker_output": None,
-        "statistician_output": None,
+        "preprocessor_output":     None,
+        "methodologist_output":    None,
+        "checker_output":          None,
+        "statistician_output":     None,
     }
     return graph.invoke(initial_state, config=config)
-
 
 def resume_aristostat(
     user_response: Any,
     thread_id: str = "default",
 ) -> dict[str, Any]:
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "run_name": "aristostat_pipeline",
+        "tags": ["pipeline", "full-run"],
+    }
     return graph.invoke(Command(resume=user_response), config=config)
 
 

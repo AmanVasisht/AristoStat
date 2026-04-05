@@ -36,7 +36,7 @@ from Tools.final_report import (
 # LLM
 # ─────────────────────────────────────────────
 
-model = ChatGroq(model="meta-llama/llama-4-maverick-17b-128e-instruct", temperature=0)
+model = ChatGroq(model="openai/gpt-oss-20b", temperature=0)
 
 
 # ─────────────────────────────────────────────
@@ -59,7 +59,7 @@ def create_final_report_agent():
 @traceable(
     name="final_report",
     tags=["agent", "react", "report-generation"],
-    metadata={"agent_pattern": "react", "model": "llama-4-maverick-17b"}
+    metadata={"agent_pattern": "react", "model": "gpt-oss-20b"}
 )
 def run_final_report(
     original_query: str,
