@@ -124,6 +124,7 @@ Agents are split into two architectural patterns based on their cognitive requir
 | **API layer** | [FastAPI](https://fastapi.tiangolo.com/) with Server-Sent Events for real-time streaming |
 | **Frontend** | Vanilla HTML/CSS/JS — single-file, no build step |
 | **Schemas** | [Pydantic v2](https://docs.pydantic.dev/) |
+| **Observability** | [LangSmith](https://smith.langchain.com/) — end-to-end tracing, latency monitoring, and agent-level metadata logging across all nine pipeline agents |
 
 ### Models
 
@@ -203,6 +204,24 @@ set GROQ_API_KEY=your_key_here      # Windows
 The core pipeline is functional across the currently supported test suite. Active areas for further development include expanding the test library, improving assumption check coverage for multi-factor designs, and additional rectification strategies for post-test violations.
 
 ---
+
+## Observability
+
+Aristostat is instrumented with **LangSmith** for full pipeline observability.
+
+Every agent is wrapped with `@traceable` and logs structured metadata — test selections, assumption results, p-values, rectification strategies, and more — as searchable fields in LangSmith.
+
+| What is tracked | Where |
+|---|---|
+| Per-agent latency and token usage | All 9 agents |
+| Selected test and test family | Methodologist |
+| Assumption pass/fail by name | Assumption Checker |
+| Rectification strategy chosen | Rectification Strategist |
+| p-value, significance, effect size | Statistician |
+| Post-test diagnostic failures | Model Critic |
+| Full pipeline summary | Final Report |
+
+**Known limitation:** With LangGraph's interrupt/resume pattern, each `graph.invoke()` call creates a separate trace in LangSmith rather than a single end-to-end trace. A single pipeline run therefore appears as multiple `aristostat_pipeline` entries — one per interrupt cycle. This is a known limitation of LangSmith's integration with LangGraph's human-in-the-loop checkpointing.
 
 ## Roadmap
 
